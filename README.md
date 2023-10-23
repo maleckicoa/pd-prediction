@@ -1,55 +1,89 @@
-__What is the application about?__
+## Probability of Default Prediction
+<img src="other/pd-prediction-return.png" alt="Probability of Default Image" />
 
-PD_prediction is a Dockerized application (Docker Hub: maleckicoa/pd_pred) that returns the probability of default for a set of given loans.
-The application is based on a real world dataset from one large European fintech company (see: dataset.csv).
+## What is the application about?
+
+PD_prediction is a Dockerized application (Docker Hub: *maleckicoa/pd_pred*) that returns the probability of default for a given set of loans.
+The application is based on a real world dataset from one large European fintech company (see: *dataset.csv*).
 
 
-__How to use the pd_pred application?__
+## How to run the application?
 
 - Install and run the Docker application.
-- Open a terminal and run "docker run -ti maleckicoa/pd_pred" to load and run the image from Docker Hub.
-- Open a new terminal, run "docker ps", then copy the container_ID of the running pd_pred container.
-- Run "docker exec -it container_ID sh" to open the shell of the running pd_pred container.
-- Paste the *curl POST request (which holds loan information) into the open container shell, and it will return the loan IDs together with their default probabilities
-
-Note that the application supports:
-  - curl requests which hold a dictionary with loan information (see example in curl_request.txt)
-  - curl requests which reference a JSON file with loan information (see example in curl_file.txt, see examples of JSON files: loan1.json, loan5.json, loan20.json)
+- Download the Docker image: `docker pull maleckicoa/pd_pred`
+- Run the container: `docker run -d -p 8000:8000 maleckicoa/pd_pred`
+- Make a curl POST request with loan data (see example **curl_file.txt**)<br/>
+  `curl -X POST "http://localhost:8000/loans_file/" -H "accept: application/json" -F "file=@loan20.json"`
+- Receive a JSON file with loan ids and probablities **{loan ID: Probability od default}**
+- More examples of JSON files: **loan1.json**, **loan5.json**, **loan20.json**
 
 
-__How does the application work?__
+## How does the application work?
+   
+FastAPI server receives loans information through curl POST requests which it then passes to the trained model object. 
 
-Running the maleckicoa/pd_pred application triggers the main.py script which then: 1) starts a FastAPI application, 2) imports the trained model object, 3) imports the PD_model_train.py script.
-FastAPI application receives loans information through curl POST requests which it then passes to the trained model object. 
 The trained model object calculates the probabilites of default for the given loan information and returns back the default probabilites. 
-The trained model object is a serialized (mod.pkl file) which can be re-trained by directly running the PD_model.train.py script as __main_ _.
-The PD_model_train.py script is the core of the application, it holds 3 classes:
-- TrainValTest class object splits the dataset into train/val/test subsets
-- WoeEncode class object encodes the data subsets using Weight of Evidence encoding
-- Model class object trains the XG-boost classifier and returns the probabilities od default
+
+The trained model object is a serialized (*mod.pkl* file) which can be re-trained - *PD_model.train.py*
+
+The *PD_model_train.py* script is the core of the application, it holds 3 classes:
+- **TrainValTest** class object splits the dataset into **train/val/test** subsets
+- **WoeEncode** class object encodes the data subsets using **Weight of Evidence** encoding
+- **Model class** object trains the **XG-boost classifier** and returns the probabilities od default
 
 
-__Can I run the application without Docker?__
+Loan features used to train the model:
 
-Yes, to run the application without Docker:
-- setup a Python environment (preferably 3.11) and all the dependencies (requirements.txt).
-- Clone this project repository localy and cd into it.
-- Generate the trained model object (mod.pkl), by directly running the PD_model_train.py script as __main_ _ (this step is done only when running the application for the 1st time).
-- Run the main.py script which will import the traned model object and start the application.
-- Open a new terminal, cd into the project repository and paste a curl request, as explained before.
+```
+    "uuid",
+    "default",
+    "account_amount_added_12_24m",
+    "account_days_in_dc_12_24m",
+    "account_days_in_rem_12_24m",
+    "account_days_in_term_12_24m",
+    "account_incoming_debt_vs_paid_0_24m",
+    "account_status",
+    "account_worst_status_0_3m",
+    "account_worst_status_12_24m",
+    "account_worst_status_3_6m",
+    "account_worst_status_6_12m",
+    "age",
+    "avg_payment_span_0_12m",
+    "avg_payment_span_0_3m",
+    "merchant_category",
+    "merchant_group",
+    "has_paid",
+    "max_paid_inv_0_12m",
+    "max_paid_inv_0_24m",
+    "name_in_email",
+    "num_active_div_by_paid_inv_0_12m",
+    "num_active_inv",
+    "num_arch_dc_0_12m",
+    "num_arch_dc_12_24m",
+    "num_arch_ok_0_12m",
+    "num_arch_ok_12_24m",
+    "num_arch_rem_0_12m",
+    "num_arch_written_off_0_12m",
+    "num_arch_written_off_12_24m",
+    "num_unpaid_bills",
+    "status_last_archived_0_24m",
+    "status_2nd_last_archived_0_24m",
+    "status_3rd_last_archived_0_24m",
+    "status_max_archived_0_6_months",
+    "status_max_archived_0_12_months",
+    "status_max_archived_0_24_months",
+    "recovery_debt",
+    "sum_capital_paid_account_0_12m",
+    "sum_capital_paid_account_12_24m",
+    "sum_paid_inv_0_12m",
+    "time_hours",
+    "worst_status_active_inv"
+```
 
-__Other information__
 
-The repository also has a PD EDA & Model Run.ipynb jupyter notebook with the exploratory data analysis
 
-If you wish make changes to the source code of the container:
-- create a new local directory
-- start an existing maleckicoa/pd_pred image container (or run a new container)
-- copy the container files into the local folder "docker cp container_ID: /usr/src/app/. /my_local_directory"
-- close the container
-- run the maleckicoa/pd_pred_image (this will make a new container) and attach volumes to the local folder: "docker run -v /my_local_directory:/usr/src/app maleckicoa/pd_pred"
-- you can now make changes to the source code in your local directory. The changes will be reflected in this particular container, even if you stop it and start it again.
 
-See the Useful_Docker_Commands.txt file for easier interaction with Docker
+
+
 
 
