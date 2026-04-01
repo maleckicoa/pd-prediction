@@ -3,15 +3,15 @@
 
 ## What is the application about?
 
-PD_prediction is a Dockerized application (Docker Hub: *maleckicoa/pd_pred*) that returns the probability of default for a given set of loans.
+PD_prediction is a Dockerized application (Docker Hub: *maleckicoa/pd-pred*) that returns the probability of default for a given set of loans.
 The application is based on a real world dataset from one large European fintech company (see: *dataset.csv*).
 
 
 ## How to run the application?
 
 - Install and run the Docker application.
-- Download the Docker image: `docker pull maleckicoa/pd_pred`
-- Run the container: `docker run -d -p 8000:8000 maleckicoa/pd_pred`
+- Download the Docker image: `docker pull maleckicoa/pd-pred`
+- Run the container: `docker run -d -p 8000:8000 maleckicoa/pd-pred`
 - Make a curl POST request with loan data (see example **curl_file.txt**)<br/>
   `curl -X POST "http://localhost:8000/loans_file/" -H "accept: application/json" -F "file=@loan20.json"`
 - Receive a JSON file with loan ids and probablities **{loan ID: Probability od default}**
@@ -24,13 +24,20 @@ FastAPI server receives loans information through curl POST requests which it th
 
 The trained model object calculates the probabilites of default for the given loan information and returns back the default probabilites. 
 
-The trained model object is a serialized (*mod.pkl* file) which can be re-trained - *PD_model.train.py*
+The trained model object is a serialized (*mod.pkl* file) which can be re-trained - *PD_model_train.py*
 
-The *PD_model_train.py* script is the core of the application, it holds 3 classes:
-- **TrainValTest** class object splits the dataset into **train/val/test** subsets
-- **WoeEncode** class object encodes the data subsets using **Weight of Evidence** encoding
-- **Model class** object trains the **XG-boost classifier** and returns the probabilities od default
+#### Model Training Pipeline
 
+The *PD_model_train.py* script implements the end-to-end training workflow:
+
+- **Data Split:** Loads the dataset, filters valid targets, and performs a stratified train/test split.  
+- **Preprocessing:** Uses a `ColumnTransformer` with WoE encoding:
+  - numerical with NA → binning + WoE  
+  - numerical without NA → passthrough  
+  - categorical → WoE  
+- **Model:** XGBoost classifier within a pipeline, with class imbalance handled via `scale_pos_weight`.  
+- **Tuning:** `RandomizedSearchCV` with PR-AUC (`average_precision`) as the scoring metric.  
+- **Output:** Saves the trained pipeline and feature list using `joblib`.  
 
 Loan features used to train the model:
 

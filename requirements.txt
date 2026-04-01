@@ -30,3 +30,4 @@ tzdata==2023.3
 uvicorn==0.22.0
 xgboost==1.7.6
 python-multipart==0.0.6
+shap>=0.44
