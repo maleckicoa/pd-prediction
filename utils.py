@@ -195,15 +195,21 @@ def plot_bars_rel(
 
 
 
-def evaluate_and_report(random_search, X_test, y_test):
+def evaluate_and_report(random_search, X_test, y_test, threshold=0.5, metric="average_precision"):
     """
     Prints the best parameters and cross-validated score from RandomizedSearchCV,
     evaluates the best estimator on the test set, and prints performance metrics.
+
+    Parameters:
+    - random_search: fitted RandomizedSearchCV object.
+    - X_test: Test features.
+    - y_test: True test labels.
+    - threshold: Probability threshold for classifying positive class (default=0.5).
     """
     # =========================
     # BEST RESULTS
     # =========================
-    print("Best CV ROC AUC:", random_search.best_score_)
+    print(f"Best CV {metric}:", random_search.best_score_)
     print("\nBest Parameters:")
     for k, v in random_search.best_params_.items():
         print(f"{k}: {v}")
@@ -217,7 +223,6 @@ def evaluate_and_report(random_search, X_test, y_test):
     y_pred_proba = best_model.predict_proba(X_test)[:, 1]
 
     # threshold (can tune later)
-    threshold = 0.5
     y_pred = (y_pred_proba >= threshold).astype(int)
 
     # metrics
