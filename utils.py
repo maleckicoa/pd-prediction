@@ -1,8 +1,9 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
 from sklearn.metrics import roc_auc_score, recall_score, precision_score, average_precision_score, confusion_matrix
-
+import seaborn as sns
 
 
 
@@ -193,6 +194,34 @@ def plot_bars_rel(
     plt.tight_layout()
     plt.show()
 
+def plot_confusion_matrix(cm, normalize=False):
+ 
+    
+    if normalize:
+        cm = cm / cm.sum(axis=1, keepdims=True)
+        fmt = ".2f"
+        title = "Normalized Confusion Matrix"
+    else:
+        fmt = "d"
+        title = "Confusion Matrix"
+    
+    plt.figure(figsize=(4, 4))
+    
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt=fmt,
+        cmap="Blues",
+        cbar=False,
+        xticklabels=["Pred 0", "Pred 1"],
+        yticklabels=["Actual 0", "Actual 1"]
+    )
+    
+    plt.title(title)
+    plt.xlabel("Predicted")
+    plt.ylabel("Actual")
+    
+    return plt.gcf()  # return figure (important for MLflow)
 
 
 def evaluate_and_report(random_search, X_test, y_test, threshold=0.5, metric="average_precision"):
@@ -243,3 +272,75 @@ def evaluate_and_report(random_search, X_test, y_test, threshold=0.5, metric="av
         index=["Actual 0", "Actual 1"],
         columns=["Pred 0", "Pred 1"]
     ))
+
+    return {
+    "roc_auc": roc_auc,
+    "pr_auc": pr_auc,
+    "precision": precision,
+    "recall": recall,
+    "confusion_matrix": cm
+}
+
+
+
+def evaluate_nn(model, loader, threshold=0.5):
+    """
+    Evaluate PyTorch model on a DataLoader and print metrics.
+    """
+
+    from sklearn.metrics import (
+        roc_auc_score,
+        average_precision_score,
+        precision_score,
+        recall_score,
+        confusion_matrix
+    )
+
+    model.eval()
+
+    all_preds = []
+    all_targets = []
+
+    with torch.no_grad():
+        for x_cat, x_num, y_batch in loader:
+            logits = model(x_cat, x_num)
+            probs = torch.sigmoid(logits)
+
+            all_preds.extend(probs.numpy())
+            all_targets.extend(y_batch.numpy())
+
+    all_preds = np.array(all_preds)
+    all_targets = np.array(all_targets)
+
+    # threshold
+    y_pred = (all_preds >= threshold).astype(int)
+
+    # metrics
+    roc_auc = roc_auc_score(all_targets, all_preds)
+    pr_auc = average_precision_score(all_targets, all_preds)
+    precision = precision_score(all_targets, y_pred)
+    recall = recall_score(all_targets, y_pred)
+    cm = confusion_matrix(all_targets, y_pred)
+
+    print("\nEvaluation Results")
+    print("------------------")
+    print("ROC AUC:", roc_auc)
+    print("PR AUC:", pr_auc)
+    print("Precision:", precision)
+    print("Recall:", recall)
+
+    print("\nConfusion Matrix:")
+    print(pd.DataFrame(
+        cm,
+        index=["Actual 0", "Actual 1"],
+        columns=["Pred 0", "Pred 1"]
+    ))
+
+    return {
+        "roc_auc": roc_auc,
+        "pr_auc": pr_auc,
+        "precision": precision,
+        "recall": recall
+    }
+
+
