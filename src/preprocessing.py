@@ -2,8 +2,11 @@ import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 
 
-from sklearn.base import BaseEstimator, TransformerMixin
-import pandas as pd
+def add_missing_indicators(df, num_na_cols):
+    df = df.copy()
+    for col in num_na_cols:
+        df[f"{col}_missing"] = df[col].isna().astype(int)
+    return df
 
 
 class QuantileBinner(BaseEstimator, TransformerMixin):
@@ -38,7 +41,8 @@ class QuantileBinner(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X):
-        X = pd.DataFrame(X, columns=self.columns_).copy()
+        X = pd.DataFrame(X).copy()
+        X = X.reindex(columns=self.columns_)
 
         for col in self.columns_:
             bins = self.bin_edges_[col]
@@ -48,10 +52,10 @@ class QuantileBinner(BaseEstimator, TransformerMixin):
                 continue
 
             binned = pd.cut(
-                X[col],
+                pd.to_numeric(X[col], errors="coerce"),
                 bins=bins,
                 include_lowest=True
-            )
+                )
 
             X[col] = binned.astype(object)
             X.loc[X[col].isna(), col] = "MISSING"
