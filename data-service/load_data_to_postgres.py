@@ -142,18 +142,21 @@ def load_test_split_to_postgres(
     Load notebook train/test split into `train_loans` and `test_loans`.
     Returns (train_rows_inserted, test_rows_inserted).
 
-    Defaults: `dataset.csv` in this directory; `.env` in the pd-prediction project root.
+    Defaults: `dataset.csv` in this directory; `.env` in this directory
+    (fallback: pd-prediction project root).
     Optional POSTGRES_HOST (localhost) and POSTGRES_PORT (5434).
     """
     csv_path = csv_path or (DATA_DIR / "dataset.csv")
-    env_path = env_path or (PROJECT_ROOT / ".env")
+    env_path = env_path or (
+        (DATA_DIR / ".env") if (DATA_DIR / ".env").is_file() else (PROJECT_ROOT / ".env")
+    )
     load_dotenv(env_path)
 
     user = os.environ["POSTGRES_USER"]
     password = os.environ["POSTGRES_PASSWORD"]
     dbname = os.environ["POSTGRES_DB"]
     host = os.environ.get("POSTGRES_HOST", "localhost")
-    port = int(os.environ.get("POSTGRES_PORT", "5434"))
+    port = int(os.environ.get("POSTGRES_PORT", "5432"))
 
     df = _read_dataset(csv_path)
     df_train, df_test = _train_test_frames(df)

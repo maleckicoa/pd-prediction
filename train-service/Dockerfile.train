@@ -9,17 +9,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml uv.lock ./
-
-RUN pip install --no-cache-dir uv
-
-RUN uv export --no-dev > requirements.txt
+# COPY pyproject.toml uv.lock ./
+# 
+# RUN pip install --no-cache-dir uv
+# 
+# RUN uv export --no-dev > requirements.txt
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-
-
-COPY src/preprocessing.py ./src/preprocessing.py
-COPY src/utils.py ./src/utils.py
-COPY data/dataset.csv ./data/dataset.csv
-
 
 ENTRYPOINT ["python"]

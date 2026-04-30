@@ -7,16 +7,15 @@ from pathlib import Path
 
 sys.path.append("src")
 
-from postgres_loans import get_engine
-from utils import (cat_na_cols, 
+from postgres_utils import get_engine
+
+from ml_utils import (cat_na_cols, 
                     cat_no_na_cols, 
                     num_na_cols, 
                     num_no_na_cols, 
                     fetch_full_dataset,
                     fetch_random_loan,
                     write_default_prob)
-
-
 
 
 engine = get_engine()

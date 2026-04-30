@@ -1,11 +1,17 @@
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import torch
 from sqlalchemy import text
-from sklearn.metrics import roc_auc_score, recall_score, precision_score, average_precision_score, confusion_matrix
+import matplotlib.pyplot as plt
 import seaborn as sns
-
+import torch
+from sklearn.metrics import (
+    roc_auc_score, 
+    recall_score, 
+    precision_score, 
+    average_precision_score, 
+    confusion_matrix, 
+    precision_recall_curve
+)
 
 cat_na_cols = [
     'account_status', 
@@ -89,7 +95,7 @@ def plot_confusion_matrix(cm, normalize=False):
     return plt.gcf()  # return figure (important for MLflow)
 
 
-def evaluate_and_report(random_search, X_test, y_test, threshold=0.5, metric="average_precision"):
+def evaluate_and_report1(random_search, X_test, y_test, threshold=0.5, metric="average_precision"):
 
     print(f"Best CV {metric}:", random_search.best_score_)
     print("\nBest Parameters:")
@@ -134,13 +140,43 @@ def evaluate_and_report(random_search, X_test, y_test, threshold=0.5, metric="av
     "confusion_matrix": cm
 }
 
-def evaluate_and_report_loaded_model(best_model, X_test, y_test, threshold=0.5, metric="average_precision"):
+
+def evaluate_and_report(
+    random_search,
+    X_test,
+    y_test,
+    min_precision=0.15,
+    metric="average_precision",
+):
+
+    print(f"Best CV {metric}:", random_search.best_score_)
+    print("\nBest Parameters:")
+    for k, v in random_search.best_params_.items():
+        print(f"{k}: {v}")
+
+    best_model = random_search.best_estimator_
 
     # probabilities
     y_pred_proba = best_model.predict_proba(X_test)[:, 1]
 
-    # threshold (can tune later)
-    y_pred = (y_pred_proba >= threshold).astype(int)
+    precisions, recalls, thresholds = precision_recall_curve(y_test, y_pred_proba)
+
+    # thresholds has len = n-1 compared to precision/recall
+    precisions = precisions[:-1]
+    recalls = recalls[:-1]
+
+    valid = precisions >= min_precision
+
+    if np.any(valid):
+        best_idx = np.argmax(recalls[valid])
+        best_threshold = thresholds[valid][best_idx]
+    else:
+        print("\nWARNING: No threshold satisfies precision constraint.")
+        best_threshold = 0.5
+
+    print(f"\nChosen threshold (precision >= {min_precision}): {best_threshold:.4f}")
+
+    y_pred = (y_pred_proba >= best_threshold).astype(int)
 
     # metrics
     roc_auc = roc_auc_score(y_test, y_pred_proba)
@@ -162,16 +198,93 @@ def evaluate_and_report_loaded_model(best_model, X_test, y_test, threshold=0.5, 
     ))
 
     return {
-    "roc_auc": roc_auc,
-    "pr_auc": pr_auc,
-    "precision": precision,
-    "recall": recall,
-    "confusion_matrix": cm
-}
+        "threshold": best_threshold,
+        "precision": precision,
+        "recall": recall,
+        "roc_auc": roc_auc,
+        "pr_auc": pr_auc,
+        "confusion_matrix": cm
+    }
 
-def evaluate_nn(model, loader, threshold=0.5):
+
+def evaluate_and_report_loaded_model(
+    best_model,
+    X_test,
+    y_test,
+    min_precision=0.15,
+    metric="average_precision",
+):
+
+    # =========================
+    # PROBABILITIES
+    # =========================
+    y_pred_proba = best_model.predict_proba(X_test)[:, 1]
+
+    # =========================
+    # THRESHOLD SELECTION (same logic)
+    # =========================
+    precisions, recalls, thresholds = precision_recall_curve(y_test, y_pred_proba)
+
+    # align shapes (thresholds = n-1)
+    precisions = precisions[:-1]
+    recalls = recalls[:-1]
+
+    valid = precisions >= min_precision
+
+    if np.any(valid):
+        best_idx = np.argmax(recalls[valid])
+        best_threshold = thresholds[valid][best_idx]
+    else:
+        print("\nWARNING: No threshold satisfies precision constraint.")
+        best_threshold = 0.5
+
+    print(f"\nChosen threshold (precision >= {min_precision}): {best_threshold:.4f}")
+
+    # =========================
+    # PREDICTIONS
+    # =========================
+    y_pred = (y_pred_proba >= best_threshold).astype(int)
+
+    # =========================
+    # METRICS
+    # =========================
+    roc_auc = roc_auc_score(y_test, y_pred_proba)
+    pr_auc = average_precision_score(y_test, y_pred_proba)
+    precision = precision_score(y_test, y_pred)
+    recall = recall_score(y_test, y_pred)
+    cm = confusion_matrix(y_test, y_pred)
+
+    print("\nTest ROC AUC:", roc_auc)
+    print("Test PR AUC:", pr_auc)
+    print("Precision:", precision)
+    print("Recall:", recall)
+
+    print("\nConfusion Matrix:")
+    print(pd.DataFrame(
+        cm,
+        index=["Actual 0", "Actual 1"],
+        columns=["Pred 0", "Pred 1"]
+    ))
+
+    return {
+        "threshold": best_threshold,
+        "precision": precision,
+        "recall": recall,
+        "roc_auc": roc_auc,
+        "pr_auc": pr_auc,
+        "confusion_matrix": cm
+    }
+
+
+
+def evaluate_nn(
+    model,
+    loader,
+    min_precision=0.15,
+):
     """
-    Evaluate PyTorch model on a DataLoader and print metrics.
+    Evaluate PyTorch model with threshold selection:
+    maximize recall subject to precision >= min_precision
     """
 
     from sklearn.metrics import (
@@ -179,7 +292,8 @@ def evaluate_nn(model, loader, threshold=0.5):
         average_precision_score,
         precision_score,
         recall_score,
-        confusion_matrix
+        confusion_matrix,
+        precision_recall_curve,
     )
 
     model.eval()
@@ -192,16 +306,40 @@ def evaluate_nn(model, loader, threshold=0.5):
             logits = model(x_cat, x_num)
             probs = torch.sigmoid(logits)
 
-            all_preds.extend(probs.numpy())
-            all_targets.extend(y_batch.numpy())
+            all_preds.extend(probs.cpu().numpy())
+            all_targets.extend(y_batch.cpu().numpy())
 
     all_preds = np.array(all_preds)
     all_targets = np.array(all_targets)
 
-    # threshold
-    y_pred = (all_preds >= threshold).astype(int)
+    # =========================
+    # THRESHOLD SELECTION
+    # =========================
+    precisions, recalls, thresholds = precision_recall_curve(all_targets, all_preds)
 
-    # metrics
+    # align shapes (thresholds = n-1)
+    precisions = precisions[:-1]
+    recalls = recalls[:-1]
+
+    valid = precisions >= min_precision
+
+    if np.any(valid):
+        best_idx = np.argmax(recalls[valid])
+        best_threshold = thresholds[valid][best_idx]
+    else:
+        print("\nWARNING: No threshold satisfies precision constraint.")
+        best_threshold = 0.5
+
+    print(f"\nChosen threshold (precision >= {min_precision}): {best_threshold:.4f}")
+
+    # =========================
+    # APPLY THRESHOLD
+    # =========================
+    y_pred = (all_preds >= best_threshold).astype(int)
+
+    # =========================
+    # METRICS
+    # =========================
     roc_auc = roc_auc_score(all_targets, all_preds)
     pr_auc = average_precision_score(all_targets, all_preds)
     precision = precision_score(all_targets, y_pred)
@@ -223,66 +361,10 @@ def evaluate_nn(model, loader, threshold=0.5):
     ))
 
     return {
+        "threshold": best_threshold,
         "roc_auc": roc_auc,
         "pr_auc": pr_auc,
         "precision": precision,
-        "recall": recall
+        "recall": recall,
+        "confusion_matrix": cm,
     }
-
-
-# def predict_single(model, X, y, idx, threshold = 0.5):
-#     x = X.iloc[[idx]]
-#     y_true = y.iloc[idx]
-    
-#     prob = model.predict_proba(x)[0, 1]
-#     pred = int(prob >= threshold)
-    
-#     print(f"Prediction: {pred}")
-#     print(f"Probability: {prob:.4f}")
-#     print(f"Actual: {y_true}")
-    
-#     return prob, pred, y_true
-
-
-# def predict_single_row(model, x_one_row: pd.DataFrame, y_true=None, threshold: float = 0.5):
-#     """One-row feature frame (same columns as training `X` passed to the model)."""
-#     if len(x_one_row) != 1:
-#         raise ValueError("x_one_row must have exactly one row")
-
-#     prob = model.predict_proba(x_one_row)[0, 1]
-#     pred = int(prob >= threshold)
-
-#     print(f"Prediction: {pred}")
-#     print(f"Probability: {prob:.4f}")
-#     if y_true is None:
-#         print("Actual: (not provided)")
-#     else:
-#         print(f"Actual: {y_true}")
-
-#     return prob, pred, y_true
-
-def fetch_full_dataset(engine, table_name: str):
-    stmt = text(f"SELECT * FROM {table_name} ORDER BY uuid")
-    df = pd.read_sql(stmt, engine)
-    y = df["default"].astype(int)
-    X = df.drop(columns=["default"]).copy()
-    return X, y
-
-def fetch_random_loan(engine) -> pd.DataFrame:
-    stmt = text("SELECT * FROM test_loans ORDER BY random() LIMIT 1")
-    df = pd.read_sql(stmt, engine)
-    if df.empty:
-        raise ValueError("No rows found in test_loans")
-    return df
-
-def write_default_prob(engine, loan_uuid: str, prob: float) -> None:
-    stmt = text(
-        """
-        INSERT INTO default_probs (uuid, pd)
-        VALUES (CAST(:uid AS uuid), :pd)
-        ON CONFLICT (uuid) DO UPDATE
-        SET pd = EXCLUDED.pd
-        """
-    )
-    with engine.begin() as conn:
-        conn.execute(stmt, {"uid": loan_uuid, "pd": prob})

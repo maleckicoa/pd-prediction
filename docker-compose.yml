@@ -1,16 +1,88 @@
 services:
-  pd-pred-postgres:
-    image: postgres:16
-    container_name: pd-pred-postgres
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+  postgres:
+    build:
+      context: ./data-service
+    #container_name: pd-postgres
     ports:
       - "5434:5432"
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      retries: 10
     volumes:
-      - pd_pgdata:/var/lib/postgresql/data
-      - ./init:/docker-entrypoint-initdb.d:ro
+      - pgdata:/var/lib/postgresql/data
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    ports:
+      - "5001:5000"
+    environment:
+      - GIT_PYTHON_REFRESH=quiet
+    volumes:
+      - mlflow_db:/mlflow
+      - mlflow_artifacts:/artifacts
+    command:
+      - mlflow
+      - server
+      - --host=0.0.0.0
+      - --port=5000
+      - --serve-artifacts
+      - --backend-store-uri=sqlite:///mlflow/mlflow.db
+      - --artifacts-destination=/artifacts
+      - --allowed-hosts=*
+    restart: unless-stopped
+
+  trainer:
+    build:
+      context: .
+      dockerfile: train-service/Dockerfile.train
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      GIT_PYTHON_REFRESH: quiet
+    volumes:
+      - ./models:/app/models
+      - ./train-service/src:/app/train-service/src
+      - ./shared:/app/shared
+      - ./.env:/app/.env:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+    profiles: ["train"]
+
+  fetcher:
+    build:
+      context: .
+      dockerfile: fetch-service/Dockerfile.fetch
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      FETCH_INTERVAL_SECONDS: 5
+      RUN_SERVICE_URL: http://predict:8800/predict
+    volumes:
+      - ./fetch-service:/app/fetch-service
+      - ./shared:/app/shared
+      - ./.env:/app/.env:ro
+    command: /app/fetch-service/main.py
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["fetch"]
 
 volumes:
-  pd_pgdata:
+  pgdata:
+    name: pd-prediction_pgdata
+  mlflow_db:
+    name: mlflow-service_mlflow_db
+  mlflow_artifacts:
+    name: mlflow-service_mlflow_artifacts
+
+
