@@ -4,6 +4,7 @@ import sys
 import time
 from pathlib import Path
 
+import pandas as pd
 import requests
 from pydantic import ValidationError
 
@@ -21,6 +22,24 @@ from shared.postgres_utils import get_engine, fetch_random_loan  # noqa: E402
 from shared.models import LoanData  # noqa: E402
 
 
+def normalize_loan_row(raw_loan: dict) -> dict:
+    normalized = {}
+    for key, value in raw_loan.items():
+        if key == "uuid" and value is not None:
+            normalized[key] = str(value)
+            continue
+
+        if pd.isna(value):
+            normalized[key] = None
+            continue
+
+        try:
+            normalized[key] = value.item()
+        except AttributeError:
+            normalized[key] = value
+    return normalized
+
+
 def main() -> None:
     engine = get_engine()
 
@@ -30,12 +49,12 @@ def main() -> None:
 
     while True:
         loan_df = fetch_random_loan(engine)
-        raw_loan = loan_df.iloc[0].to_dict()
+        raw_loan = normalize_loan_row(loan_df.iloc[0].to_dict())
 
         try:
             loan = LoanData(**raw_loan)
             payload = loan.dict()
-            print(json.dumps(payload, default=str), flush=True)
+            #print(json.dumps(payload, default=str), flush=True)
 
             response = requests.post(
                 run_service_url,

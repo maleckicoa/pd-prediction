@@ -75,7 +75,34 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      predict:
+        condition: service_started
     profiles: ["fetch"]
+
+  predict:
+    build:
+      context: .
+      dockerfile: predict-service/Dockerfile.predict
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      MODEL_NAME: ${MODEL_NAME:-xgb2}
+      MODEL_PATH: ${MODEL_PATH:-/app/models/xgb2_model.pkl}
+      MODEL_SCHEMA_PATH: ${MODEL_SCHEMA_PATH:-/app/predict-service/src/xgb2/xgb2_schema.json}
+    ports:
+      - "8800:8800"
+    volumes:
+      - ./predict-service:/app/predict-service
+      - ./shared:/app/shared
+      - ./models:/app/models
+      - ./.env:/app/.env:ro
+    command: /app/predict-service/main.py
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["fetch", "predict"]
 
 volumes:
   pgdata:

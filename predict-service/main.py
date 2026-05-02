@@ -1,135 +1,85 @@
-import joblib
+import os
+import sys
+from pathlib import Path
+from typing import Any, Dict, List
+
 import uvicorn
-import pandas as pd
-import json
+from fastapi import FastAPI, HTTPException
 
-from fastapi import FastAPI, HTTPException, UploadFile
-from pydantic import BaseModel
-from typing import List, Optional
+candidates = [
+    Path(__file__).resolve().parent,
+    Path(__file__).resolve().parents[1],
+    Path(__file__).resolve().parents[2],
+]
 
-from sklearn.base import BaseEstimator, TransformerMixin
-from preprocessing import QuantileBinner
+for candidate in candidates:
+    if (candidate / "shared").exists():
+        sys.path.insert(0, str(candidate))
+        break
+
+from shared.models import LoanData  # noqa: E402
+from shared.postgres_utils import (  # noqa: E402
+    get_engine,
+    write_default_prob,
+)
+from src.lr1.lr1_predict import Lr1Predictor  # noqa: E402
+from src.xgb2.xgb2_predict import Xgb2Predictor  # noqa: E402
 
 
-# load model bundle
-bundle = joblib.load("model_bundle.pkl")
-mod = bundle["model"]
-features = bundle["features"]
+class UnsupportedModelError(ValueError):
+    pass
+
+
+def build_predictor(model_name: str, model_path: str, schema_path: str) -> Any:
+    predictors = {
+        "lr1": Lr1Predictor,
+        "xgb2": Xgb2Predictor,
+    }
+    predictor_class = predictors.get(model_name)
+    if predictor_class is None:
+        supported = ", ".join(sorted(predictors.keys()))
+        raise UnsupportedModelError(
+            f"Unsupported MODEL_NAME={model_name!r}. Supported models: {supported}"
+        )
+    return predictor_class(model_path=model_path, schema_path=schema_path)
+
 
 app = FastAPI()
+engine = get_engine()
+model_name = os.getenv("MODEL_NAME", "xgb2")
+prediction_threshold = float(os.getenv("PREDICTION_THRESHOLD", "0.5"))
+model_path = os.getenv("MODEL_PATH", f"/app/models/{model_name}_model.pkl")
+schema_path = os.getenv(
+    "MODEL_SCHEMA_PATH",
+    f"/app/predict-service/src/{model_name}/{model_name}_schema.json",
+)
+predictor = build_predictor(model_name, model_path, schema_path)
 
 
-class LoanData(BaseModel):
-    uuid: Optional[str] = None
-    default: Optional[int] = None
-    account_amount_added_12_24m: Optional[int] = None
-    account_days_in_dc_12_24m: Optional[int] = None
-    account_days_in_rem_12_24m: Optional[int] = None
-    account_days_in_term_12_24m: Optional[int] = None
-    account_incoming_debt_vs_paid_0_24m: Optional[float] = None
-    account_status: Optional[int] = None
-    account_worst_status_0_3m: Optional[int] = None
-    account_worst_status_12_24m: Optional[int] = None
-    account_worst_status_3_6m: Optional[int] = None
-    account_worst_status_6_12m: Optional[int] = None
-    age: Optional[int] = None
-    avg_payment_span_0_12m: Optional[float] = None
-    avg_payment_span_0_3m: Optional[float] = None
-    merchant_category: Optional[str] = None
-    merchant_group: Optional[str] = None
-    has_paid: Optional[bool] = None
-    max_paid_inv_0_12m: Optional[int] = None
-    max_paid_inv_0_24m: Optional[int] = None
-    name_in_email: Optional[str] = None
-    num_active_div_by_paid_inv_0_12m: Optional[float] = None
-    num_active_inv: Optional[int] = None
-    num_arch_dc_0_12m: Optional[int] = None
-    num_arch_dc_12_24m: Optional[int] = None
-    num_arch_ok_0_12m: Optional[int] = None
-    num_arch_ok_12_24m: Optional[int] = None
-    num_arch_rem_0_12m: Optional[int] = None
-    num_arch_written_off_0_12m: Optional[int] = None
-    num_arch_written_off_12_24m: Optional[int] = None
-    num_unpaid_bills: Optional[int] = None
-    status_last_archived_0_24m: Optional[int] = None
-    status_2nd_last_archived_0_24m: Optional[int] = None
-    status_3rd_last_archived_0_24m: Optional[int] = None
-    status_max_archived_0_6_months: Optional[int] = None
-    status_max_archived_0_12_months: Optional[int] = None
-    status_max_archived_0_24_months: Optional[int] = None
-    recovery_debt: Optional[int] = None
-    sum_capital_paid_account_0_12m: Optional[int] = None
-    sum_capital_paid_account_12_24m: Optional[int] = None
-    sum_paid_inv_0_12m: Optional[int] = None
-    time_hours: Optional[float] = None
-    worst_status_active_inv: Optional[int] = None
+@app.get("/health")
+async def health() -> Dict[str, str]:
+    return {"status": "ok", "model": predictor.model_name}
 
 
-# =========================
-# HELPER FUNCTION
-# =========================
-def prepare_dataframe(data_list):
-    if not data_list:
-        raise ValueError("Empty input data")
-
-    df = pd.DataFrame(data_list)
-
-    # drop target
-    df = df.drop(columns=["default"], errors="ignore")
-
-    # fix types
-    if "has_paid" in df.columns:
-        df["has_paid"] = df["has_paid"].astype(float)
-
-    # enforce schema
-    df = df.reindex(columns=features)
-
-    return df
-
-
-# =========================
-# MAIN ENDPOINT
-# =========================
-@app.post("/")
-async def loans_request(data: List[LoanData]):
+@app.post("/predict")
+async def predict(loans: List[LoanData]):
     try:
-        df = prepare_dataframe([item.model_dump() for item in data])
+        loan_rows = [loan.dict() for loan in loans]
+        predictions = predictor.predict(loan_rows)
 
-        preds = mod.predict_proba(df)[:, 1]
-
-        return [
-            {"uuid": u, "pd": float(p)}
-            for u, p in zip(df["uuid"], preds)
-        ]
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# =========================
-# FILE ENDPOINT
-# =========================
-@app.post("/loans_file/")
-async def loans_file(file: UploadFile):
-    try:
-        json_data = await file.read()
-        loan_data = json.loads(json_data)
-
-        if isinstance(loan_data, dict):
-            loan_data = [loan_data]
-
-        df = prepare_dataframe(loan_data)
-
-        preds = mod.predict_proba(df)[:, 1]
-
-        return [
-            {"uuid": u, "pd": float(p)}
-            for u, p in zip(df["uuid"], preds)
-        ]
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        for loan_row, prediction in zip(loan_rows, predictions):
+            write_default_prob(
+                engine=engine,
+                loan_uuid=prediction["uuid"],
+                prob=prediction["pd"],
+                model_name=prediction["model_name"],
+                threshold_applied=prediction_threshold,
+                loan_default=loan_row.get("default"),
+            )
+        return predictions
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8800, reload=False)

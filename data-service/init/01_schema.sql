@@ -95,6 +95,41 @@ CREATE TABLE test_loans (
 CREATE INDEX test_loans_uuid_idx ON test_loans (uuid);
 
 CREATE TABLE default_probs (
-    uuid UUID PRIMARY KEY,
-    pd DOUBLE PRECISION NOT NULL
+    uuid UUID NOT NULL,
+    pd DOUBLE PRECISION NOT NULL,
+    threshold_applied DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+    loan_default INTEGER,
+    model_name TEXT NOT NULL DEFAULT 'unknown',
+    predicted_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX default_probs_uuid_idx ON default_probs (uuid);
+CREATE INDEX default_probs_predicted_at_idx ON default_probs (predicted_at_utc DESC);
+
+CREATE OR REPLACE FUNCTION prune_default_probs()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF (SELECT COUNT(*) FROM default_probs) > 100000 THEN
+        WITH oldest AS (
+            SELECT ctid
+            FROM default_probs
+            ORDER BY predicted_at_utc ASC, ctid ASC
+            LIMIT 20000
+        )
+        DELETE FROM default_probs d
+        USING oldest o
+        WHERE d.ctid = o.ctid;
+    END IF;
+
+    RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_prune_default_probs ON default_probs;
+
+CREATE TRIGGER trg_prune_default_probs
+AFTER INSERT ON default_probs
+FOR EACH STATEMENT
+EXECUTE FUNCTION prune_default_probs();

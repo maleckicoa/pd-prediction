@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -79,14 +80,48 @@ def fetch_random_loan(engine) -> pd.DataFrame:
         raise ValueError("No rows found in test_loans")
     return df
 
-def write_default_prob(engine, loan_uuid: str, prob: float) -> None:
+
+def write_default_prob(
+    engine,
+    loan_uuid: str,
+    prob: float,
+    model_name: str = "unknown",
+    threshold_applied: float = 0.5,
+    loan_default: int | None = None,
+    predicted_at_utc: datetime | None = None,
+) -> None:
+    if predicted_at_utc is None:
+        predicted_at_utc = datetime.now(timezone.utc)
+
     stmt = text(
         """
-        INSERT INTO default_probs (uuid, pd)
-        VALUES (CAST(:uid AS uuid), :pd)
-        ON CONFLICT (uuid) DO UPDATE
-        SET pd = EXCLUDED.pd
+        INSERT INTO default_probs (
+            uuid,
+            pd,
+            threshold_applied,
+            loan_default,
+            model_name,
+            predicted_at_utc
+        )
+        VALUES (
+            CAST(:uid AS uuid),
+            :pd,
+            :threshold_applied,
+            :loan_default,
+            :model_name,
+            :predicted_at_utc
+        )
         """
     )
     with engine.begin() as conn:
-        conn.execute(stmt, {"uid": loan_uuid, "pd": prob})
+        conn.execute(
+            stmt,
+            {
+                "uid": loan_uuid,
+                "pd": prob,
+                "model_name": model_name,
+                "predicted_at_utc": predicted_at_utc,
+                "threshold_applied": threshold_applied,
+                "loan_default": loan_default,
+            },
+        )
