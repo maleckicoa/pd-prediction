@@ -31,6 +31,7 @@ from shared.ml_utils import (  # noqa: E402
     num_na_cols,
     num_no_na_cols,
     evaluate_and_report,
+    evaluate_and_report_loaded_model,
     plot_confusion_matrix,
 )
 
@@ -116,7 +117,7 @@ def train_and_log_model(
         n_iter=n_iter,
         scoring="average_precision",
         cv=cv,
-        verbose=2,
+        verbose=1,
         random_state=random_state,
         n_jobs=-1,
         error_score="raise",
@@ -174,11 +175,17 @@ def train_and_log_model(
     # SAVE LOCALLY
     # =========================
     best_model = random_search.best_estimator_
+    cat_categories = {
+        col: X_train[col].cat.categories.tolist()
+        for col in all_cat_cols
+        if col in X_train.columns
+    }
 
     joblib.dump(
         {
             "model": best_model,
             "features": X_train.columns.tolist(),
+            "cat_categories": cat_categories,
         },
         output_path,
     )
@@ -198,11 +205,28 @@ def main():
 
     X_train, X_val, y_train, y_val = prepare_datasets(engine)
 
-    train_and_log_model(
+    best_model = train_and_log_model(
         X_train,
         y_train,
         X_val,
         y_val,
+    )
+
+    # Evaluate the trained model on the held-out test dataset.
+    X_test, y_test = fetch_full_dataset(engine, "test_loans")
+    X_test = X_test[feature_cols].copy()
+
+    # Match xgb1 categorical handling from training.
+    for col in all_cat_cols:
+        X_test[col] = X_test[col].astype("category")
+        X_test[col] = X_test[col].cat.set_categories(X_train[col].cat.categories)
+
+    print("\n=== XGB1 Test-set evaluation ===")
+    evaluate_and_report_loaded_model(
+        best_model,
+        X_test,
+        y_test,
+        metric="average_precision",
     )
 
 

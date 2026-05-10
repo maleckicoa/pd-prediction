@@ -41,6 +41,7 @@ from shared.ml_utils import (  # noqa: E402
     num_na_cols,
     num_no_na_cols,
     evaluate_and_report,
+    evaluate_and_report_loaded_model,
     plot_confusion_matrix,
 )
 
@@ -285,12 +286,24 @@ def main():
 
     preprocessor = build_preprocessor()
 
-    train_and_log_model(
+    best_model = train_and_log_model(
         X_train,
         y_train,
         X_val,
         y_val,
         preprocessor,
+    )
+
+    # Evaluate the trained model on the held-out test dataset.
+    X_test, y_test = fetch_full_dataset(engine, "test_loans")
+    X_test = X_test[feature_cols].copy()
+
+    print("\n=== XGB2 Test-set evaluation ===")
+    evaluate_and_report_loaded_model(
+        best_model,
+        X_test,
+        y_test,
+        metric="average_precision",
     )
 
 

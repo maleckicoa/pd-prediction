@@ -8,7 +8,7 @@ import pandas as pd
 
 class Xgb2Predictor:
     def __init__(self, model_path: str, schema_path: str) -> None:
-        self.model_name = "xgb2"
+        self.model_name = "xgb_v2"
         self.model_path = Path(model_path)
         self.schema_path = Path(schema_path)
 

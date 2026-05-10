@@ -7,7 +7,7 @@ import pandas as pd
 
 class Lr1Predictor:
     def __init__(self, model_path: str, schema_path: str | None = None) -> None:
-        self.model_name = "lr1"
+        self.model_name = "lr_v1"
         self.model_path = Path(model_path)
         self.schema_path = Path(schema_path) if schema_path else None
 

@@ -12,9 +12,7 @@ from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold, train_t
 from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LogisticRegression
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler
 
-# Match xgb1/xgb2 import behavior when running via script path.
 candidates = [
     Path(__file__).resolve().parents[2],
     Path(__file__).resolve().parents[3],
@@ -26,7 +24,7 @@ for candidate in candidates:
         break
 
 from shared.postgres_utils import get_engine, fetch_full_dataset  # noqa: E402
-from shared.preprocessing import add_missing_indicators  # noqa: E402
+from shared.preprocessing import add_missing_indicators, QuantileBinner  # noqa: E402
 from shared.ml_utils import (  # noqa: E402
     cat_na_cols,
     cat_no_na_cols,
@@ -68,16 +66,16 @@ def prepare_datasets(engine, random_state=42):
 def build_preprocessor(num_indicator_columns):
     num_na_pipeline = Pipeline([
         ("imputer", SimpleImputer(strategy="median")),
-        ("scaler", StandardScaler()),
+        ("binning", QuantileBinner(n_bins=5)),
+        ("woe", ce.WOEEncoder(handle_missing="value", handle_unknown="value")),
     ])
 
     num_no_na_pipeline = Pipeline([
-        ("scaler", StandardScaler()),
+        ("binning", QuantileBinner(n_bins=5)),
+        ("woe", ce.WOEEncoder(handle_missing="value", handle_unknown="value")),
     ])
 
-    indicator_pipeline = Pipeline([
-        ("passthrough", "passthrough"),
-    ])
+    indicator_pipeline = "passthrough"
 
     cat_pipeline = Pipeline([
         ("imputer", SimpleImputer(strategy="constant", fill_value="MISSING")),
@@ -99,7 +97,7 @@ def train_and_log_model(
     X_val,
     y_val,
     preprocessor,
-    output_path="models/lr1_model.pkl",
+    output_path="models/lr2_model.pkl",
     n_iter=10,
     random_state=42,
 ):
@@ -125,12 +123,19 @@ def train_and_log_model(
         verbose=1,
         random_state=random_state,
         n_jobs=-1,
+        error_score="raise",
     )
 
-    with mlflow.start_run(run_name="lr_v1"):
-        random_search.fit(X_train, y_train)
+    with mlflow.start_run(run_name="lr_v2"):
+        random_search.fit(X_train, y_train.to_numpy())
         results = evaluate_and_report(
             random_search, X_val, y_val, metric="average_precision"
+        )
+
+        mlflow.set_tag("encoding", "woe + quantile_binning")
+        mlflow.set_tag(
+            "model_summary",
+            "Logistic regression with WoE encoding and quantile binning (credit risk)",
         )
 
         mlflow.log_input(
@@ -143,7 +148,7 @@ def train_and_log_model(
         mlflow.log_param("solver", "liblinear")
         mlflow.log_param("class_weight", "balanced")
         mlflow.log_param("scoring", "average_precision")
-        mlflow.log_param("threshold", 0.5)
+        mlflow.log_param("threshold", float(results["threshold"]))
 
         results_without_cm = {
             k: float(v) for k, v in results.items() if k != "confusion_matrix"
@@ -169,8 +174,6 @@ def train_and_log_model(
 
 
 def main():
-    # MLFLOW CONFIG
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
     mlflow.set_tracking_uri("http://mlflow:5000")
     mlflow.set_experiment("credit-risk-models")
     engine = get_engine()
@@ -178,19 +181,19 @@ def main():
     preprocessor = build_preprocessor(num_indicator_columns)
     best_model = train_and_log_model(X_train, y_train, X_val, y_val, preprocessor)
 
-    # Evaluate the trained model on the held-out test dataset.
     X_test, y_test = fetch_full_dataset(engine, "test_loans")
     X_test = X_test[feature_cols].copy()
     X_test = add_missing_indicators(X_test, num_na_cols)
     X_test = X_test.reindex(columns=X_train.columns, fill_value=0)
 
-    print("\n=== LR1 Test-set evaluation ===")
+    print("\n=== LR2 Test-set evaluation ===")
     evaluate_and_report_loaded_model(
         best_model,
         X_test,
         y_test,
         metric="average_precision",
     )
+
 
 if __name__ == "__main__":
     main()

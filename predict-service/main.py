@@ -1,4 +1,3 @@
-import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -23,6 +22,13 @@ from shared.postgres_utils import (  # noqa: E402
     write_default_prob,
 )
 from src.lr1.lr1_predict import Lr1Predictor  # noqa: E402
+from src.utils import (  # noqa: E402
+    parse_model_names,
+    resolve_model_path,
+    resolve_schema_path,
+    resolve_threshold,
+)
+from src.xgb1.xgb1_predict import Xgb1Predictor  # noqa: E402
 from src.xgb2.xgb2_predict import Xgb2Predictor  # noqa: E402
 
 
@@ -30,9 +36,10 @@ class UnsupportedModelError(ValueError):
     pass
 
 
-def build_predictor(model_name: str, model_path: str, schema_path: str) -> Any:
+def build_predictor(model_name: str, model_path: str, schema_path: str | None) -> Any:
     predictors = {
         "lr1": Lr1Predictor,
+        "xgb1": Xgb1Predictor,
         "xgb2": Xgb2Predictor,
     }
     predictor_class = predictors.get(model_name)
@@ -46,37 +53,49 @@ def build_predictor(model_name: str, model_path: str, schema_path: str) -> Any:
 
 app = FastAPI()
 engine = get_engine()
-model_name = os.getenv("MODEL_NAME", "xgb2")
-prediction_threshold = float(os.getenv("PREDICTION_THRESHOLD", "0.5"))
-model_path = os.getenv("MODEL_PATH", f"/app/models/{model_name}_model.pkl")
-schema_path = os.getenv(
-    "MODEL_SCHEMA_PATH",
-    f"/app/predict-service/src/{model_name}/{model_name}_schema.json",
-)
-predictor = build_predictor(model_name, model_path, schema_path)
+model_names = parse_model_names()
+predictors: Dict[str, Any] = {}
+threshold_by_model: Dict[str, float] = {}
+
+for name in model_names:
+    predictors[name] = build_predictor(
+        model_name=name,
+        model_path=resolve_model_path(name),
+        schema_path=resolve_schema_path(name),
+    )
+    threshold_by_model[name] = resolve_threshold(name)
 
 
 @app.get("/health")
-async def health() -> Dict[str, str]:
-    return {"status": "ok", "model": predictor.model_name}
+async def health() -> Dict[str, Any]:
+    return {"status": "ok", "models": sorted(list(predictors.keys()))}
 
 
 @app.post("/predict")
 async def predict(loans: List[LoanData]):
     try:
         loan_rows = [loan.dict() for loan in loans]
-        predictions = predictor.predict(loan_rows)
+        all_predictions: List[Dict[str, Any]] = []
 
-        for loan_row, prediction in zip(loan_rows, predictions):
-            write_default_prob(
-                engine=engine,
-                loan_uuid=prediction["uuid"],
-                prob=prediction["pd"],
-                model_name=prediction["model_name"],
-                threshold_applied=prediction_threshold,
-                loan_default=loan_row.get("default"),
-            )
-        return predictions
+        for model_name, predictor in predictors.items():
+            predictions = predictor.predict(loan_rows)
+            all_predictions.extend(predictions)
+
+            loan_default_by_uuid = {
+                str(loan_row.get("uuid")): loan_row.get("default") for loan_row in loan_rows
+            }
+            for prediction in predictions:
+                loan_uuid = str(prediction["uuid"])
+                write_default_prob(
+                    engine=engine,
+                    loan_uuid=loan_uuid,
+                    prob=prediction["pd"],
+                    model_name=prediction["model_name"],
+                    threshold_applied=threshold_by_model[model_name],
+                    loan_default=loan_default_by_uuid.get(loan_uuid),
+                )
+
+        return all_predictions
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

@@ -8,9 +8,15 @@ services:
     env_file:
       - .env
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 3s
-      retries: 10
+      test:
+        [
+          "CMD-SHELL",
+          "psql -U $${POSTGRES_USER} -d $${POSTGRES_DB} -tAc \"SELECT CASE WHEN to_regclass('public.train_feat_dist') IS NOT NULL AND EXISTS (SELECT 1 FROM train_feat_dist LIMIT 1) THEN 1 ELSE 0 END\" | grep -q 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
     volumes:
       - pgdata:/var/lib/postgresql/data
 
@@ -34,7 +40,8 @@ services:
       - --allowed-hosts=*
     restart: unless-stopped
 
-  trainer:
+  train:
+    image: pd-prediction-train:latest
     build:
       context: .
       dockerfile: train-service/Dockerfile.train
@@ -56,7 +63,34 @@ services:
         condition: service_started
     profiles: ["train"]
 
-  fetcher:
+  # Runs once before predict: trains LR1 if models/lr1_model.pkl is missing (empty or new models/ folder).
+  train-init:
+    image: pd-prediction-train:latest
+    build:
+      context: .
+      dockerfile: train-service/Dockerfile.train
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      GIT_PYTHON_REFRESH: quiet
+    volumes:
+      - ./models:/app/models
+      - ./train-service/src:/app/train-service/src
+      - ./shared:/app/shared
+      - ./.env:/app/.env:ro
+      - ./train-init/ensure_lr1_model.sh:/app/train-init/ensure_lr1_model.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+    entrypoint: ["/bin/sh"]
+    command: ["/app/train-init/ensure_lr1_model.sh"]
+    restart: "no"
+
+  fetch:
     build:
       context: .
       dockerfile: fetch-service/Dockerfile.fetch
@@ -65,7 +99,7 @@ services:
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      FETCH_INTERVAL_SECONDS: 5
+      FETCH_INTERVAL_SECONDS: 1
       RUN_SERVICE_URL: http://predict:8800/predict
     volumes:
       - ./fetch-service:/app/fetch-service
@@ -88,9 +122,9 @@ services:
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      MODEL_NAME: ${MODEL_NAME:-xgb2}
-      MODEL_PATH: ${MODEL_PATH:-/app/models/xgb2_model.pkl}
-      MODEL_SCHEMA_PATH: ${MODEL_SCHEMA_PATH:-/app/predict-service/src/xgb2/xgb2_schema.json}
+      # Default lr1 matches cold-start train-init. Set PREDICT_MODEL_NAMES (host or .env for compose) for multi-model.
+      MODEL_NAME: ${MODEL_NAME:-lr1}
+      MODEL_NAMES: ${PREDICT_MODEL_NAMES:-lr1}
     ports:
       - "8800:8800"
     volumes:
@@ -102,6 +136,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      train-init:
+        condition: service_completed_successfully
     profiles: ["fetch", "predict"]
 
 volumes:

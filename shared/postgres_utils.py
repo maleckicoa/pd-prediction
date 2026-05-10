@@ -81,6 +81,38 @@ def fetch_random_loan(engine) -> pd.DataFrame:
     return df
 
 
+def fetch_next_loan(engine, last_uuid: str | None = None) -> pd.DataFrame:
+    if last_uuid:
+        stmt = text(
+            """
+            SELECT *
+            FROM test_loans
+            WHERE uuid > CAST(:last_uuid AS uuid)
+            ORDER BY uuid ASC
+            LIMIT 1
+            """
+        )
+        df = pd.read_sql(stmt, engine, params={"last_uuid": last_uuid})
+    else:
+        df = pd.DataFrame()
+
+    if df.empty:
+        # First iteration or wrap-around when reaching the largest UUID.
+        stmt = text(
+            """
+            SELECT *
+            FROM test_loans
+            ORDER BY uuid ASC
+            LIMIT 1
+            """
+        )
+        df = pd.read_sql(stmt, engine)
+
+    if df.empty:
+        raise ValueError("No rows found in test_loans")
+    return df
+
+
 def write_default_prob(
     engine,
     loan_uuid: str,
@@ -95,7 +127,24 @@ def write_default_prob(
 
     stmt = text(
         """
-        INSERT INTO default_probs (
+        WITH existing AS (
+            SELECT id
+            FROM loan_ids
+            WHERE uuid = CAST(:uid AS uuid)
+        ),
+        inserted AS (
+            INSERT INTO loan_ids (uuid)
+            SELECT CAST(:uid AS uuid)
+            WHERE NOT EXISTS (SELECT 1 FROM existing)
+            RETURNING id
+        ),
+        loan AS (
+            SELECT id FROM existing
+            UNION ALL
+            SELECT id FROM inserted
+        )
+        INSERT INTO test_defaults (
+            id,
             uuid,
             pd,
             threshold_applied,
@@ -103,14 +152,15 @@ def write_default_prob(
             model_name,
             predicted_at_utc
         )
-        VALUES (
+        SELECT
+            loan.id,
             CAST(:uid AS uuid),
             :pd,
             :threshold_applied,
             :loan_default,
             :model_name,
             :predicted_at_utc
-        )
+        FROM loan
         """
     )
     with engine.begin() as conn:
@@ -125,3 +175,10 @@ def write_default_prob(
                 "loan_default": loan_default,
             },
         )
+
+
+def reset_test_cycle_tables(engine) -> None:
+    """Clear per-cycle outputs after one full pass through test loans."""
+    with engine.begin() as conn:
+        conn.execute(text("TRUNCATE TABLE test_defaults, test_feat_hit RESTART IDENTITY"))
+        conn.execute(text("SELECT setval('test_feat_hit_loan_event_idx_seq', 1, false)"))
