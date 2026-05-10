@@ -8,9 +8,15 @@ services:
     env_file:
       - .env
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 3s
-      retries: 10
+      test:
+        [
+          "CMD-SHELL",
+          "psql -U $${POSTGRES_USER} -d $${POSTGRES_DB} -tAc \"SELECT CASE WHEN to_regclass('public.train_feat_dist') IS NOT NULL AND EXISTS (SELECT 1 FROM train_feat_dist LIMIT 1) THEN 1 ELSE 0 END\" | grep -q 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
     volumes:
       - pgdata:/var/lib/postgresql/data
 
@@ -65,7 +71,7 @@ services:
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      FETCH_INTERVAL_SECONDS: 5
+      FETCH_INTERVAL_SECONDS: 1
       RUN_SERVICE_URL: http://predict:8800/predict
     volumes:
       - ./fetch-service:/app/fetch-service

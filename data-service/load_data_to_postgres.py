@@ -20,6 +20,7 @@ from sklearn.model_selection import train_test_split
 from sqlalchemy import create_engine, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.engine import URL
+from feature_dist_profile import build_feature_dist_profile
 
 DATA_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = DATA_DIR.parent
@@ -69,7 +70,6 @@ LOAN_COLUMNS: list[str] = [
     "time_hours",
     "worst_status_active_inv",
 ]
-
 
 def load_dotenv(path: Path) -> None:
     if not path.is_file():
@@ -132,6 +132,20 @@ def _engine(user: str, password: str, host: str, port: int, dbname: str):
     )
 
 
+def _write_feature_dist_profile(conn, profile_df: pd.DataFrame) -> None:
+    conn.execute(text("TRUNCATE train_feat_dist"))
+    if profile_df.empty:
+        return
+    profile_df.to_sql(
+        "train_feat_dist",
+        conn,
+        if_exists="append",
+        index=False,
+        chunksize=500,
+        method="multi",
+    )
+
+
 def load_test_split_to_postgres(
     *,
     csv_path: Path | None = None,
@@ -187,6 +201,8 @@ def load_test_split_to_postgres(
             method="multi",
             dtype={"uuid": PG_UUID(as_uuid=True)},
         )
+        profile_df = build_feature_dist_profile(df_train_out)
+        _write_feature_dist_profile(conn, profile_df)
     return len(df_train_out), len(df_test_out)
 
 

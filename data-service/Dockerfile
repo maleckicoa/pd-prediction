@@ -16,6 +16,7 @@ COPY init/ /docker-entrypoint-initdb.d/
 
 # Seed script and env used by loader.
 COPY load_data_to_postgres.py /seed/load_data_to_postgres.py
+COPY feature_dist_profile.py /seed/feature_dist_profile.py
 COPY dataset.csv /seed/dataset.csv
 
 # Custom entrypoint to bootstrap DB + load data in one process.

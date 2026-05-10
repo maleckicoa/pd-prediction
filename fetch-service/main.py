@@ -3,6 +3,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from uuid import UUID
 
 import pandas as pd
 import requests
@@ -18,8 +19,9 @@ for candidate in candidates:
         sys.path.insert(0, str(candidate))
         break
 
-from shared.postgres_utils import get_engine, fetch_random_loan  # noqa: E402
+from shared.postgres_utils import fetch_next_loan, get_engine, reset_test_cycle_tables  # noqa: E402
 from shared.models import LoanData  # noqa: E402
+from src.feature_bin_events import load_feature_profile, write_feature_bin_events  # noqa: E402
 
 
 def normalize_loan_row(raw_loan: dict) -> dict:
@@ -42,14 +44,34 @@ def normalize_loan_row(raw_loan: dict) -> dict:
 
 def main() -> None:
     engine = get_engine()
+    profile_by_feature = load_feature_profile(engine)
+    if not profile_by_feature:
+        raise RuntimeError("train_feat_dist is empty; cannot write PSI events")
+    last_uuid: str | None = None
 
     interval_seconds = float(os.getenv("FETCH_INTERVAL_SECONDS", "5"))
     run_service_url = os.getenv("RUN_SERVICE_URL", "http://predict:8800/predict")
     request_timeout = float(os.getenv("RUN_SERVICE_TIMEOUT_SECONDS", "10"))
 
     while True:
-        loan_df = fetch_random_loan(engine)
+        loan_df = fetch_next_loan(engine, last_uuid=last_uuid)
         raw_loan = normalize_loan_row(loan_df.iloc[0].to_dict())
+        current_uuid = raw_loan.get("uuid")
+
+        if last_uuid is not None and current_uuid is not None:
+            if UUID(str(current_uuid)) <= UUID(last_uuid):
+                reset_test_cycle_tables(engine)
+                print(
+                    json.dumps(
+                        {
+                            "cycle_reset": True,
+                            "reason": "wrapped_to_start_of_test_loans",
+                            "previous_uuid": last_uuid,
+                            "current_uuid": str(current_uuid),
+                        }
+                    ),
+                    flush=True,
+                )
 
         try:
             loan = LoanData(**raw_loan)
@@ -73,6 +95,9 @@ def main() -> None:
                 ),
                 flush=True,
             )
+            write_feature_bin_events(engine, profile_by_feature, raw_loan)
+            if current_uuid is not None:
+                last_uuid = str(current_uuid)
         except ValidationError as exc:
             print(
                 json.dumps(
