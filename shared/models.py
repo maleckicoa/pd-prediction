@@ -1,22 +1,6 @@
-import joblib
-import uvicorn
-import pandas as pd
-import json
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile
 from pydantic import BaseModel
-from typing import List, Optional
-
-from sklearn.base import BaseEstimator, TransformerMixin
-from preprocessing import QuantileBinner
-
-
-# load model bundle
-bundle = joblib.load("model_bundle.pkl")
-mod = bundle["model"]
-features = bundle["features"]
-
-app = FastAPI()
 
 
 class LoanData(BaseModel):
@@ -63,73 +47,3 @@ class LoanData(BaseModel):
     sum_paid_inv_0_12m: Optional[int] = None
     time_hours: Optional[float] = None
     worst_status_active_inv: Optional[int] = None
-
-
-# =========================
-# HELPER FUNCTION
-# =========================
-def prepare_dataframe(data_list):
-    if not data_list:
-        raise ValueError("Empty input data")
-
-    df = pd.DataFrame(data_list)
-
-    # drop target
-    df = df.drop(columns=["default"], errors="ignore")
-
-    # fix types
-    if "has_paid" in df.columns:
-        df["has_paid"] = df["has_paid"].astype(float)
-
-    # enforce schema
-    df = df.reindex(columns=features)
-
-    return df
-
-
-# =========================
-# MAIN ENDPOINT
-# =========================
-@app.post("/")
-async def loans_request(data: List[LoanData]):
-    try:
-        df = prepare_dataframe([item.model_dump() for item in data])
-
-        preds = mod.predict_proba(df)[:, 1]
-
-        return [
-            {"uuid": u, "pd": float(p)}
-            for u, p in zip(df["uuid"], preds)
-        ]
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# =========================
-# FILE ENDPOINT
-# =========================
-@app.post("/loans_file/")
-async def loans_file(file: UploadFile):
-    try:
-        json_data = await file.read()
-        loan_data = json.loads(json_data)
-
-        if isinstance(loan_data, dict):
-            loan_data = [loan_data]
-
-        df = prepare_dataframe(loan_data)
-
-        preds = mod.predict_proba(df)[:, 1]
-
-        return [
-            {"uuid": u, "pd": float(p)}
-            for u, p in zip(df["uuid"], preds)
-        ]
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)

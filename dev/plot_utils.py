@@ -1,8 +1,10 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
+from sqlalchemy import text
 from sklearn.metrics import roc_auc_score, recall_score, precision_score, average_precision_score, confusion_matrix
-
+import seaborn as sns
 
 
 
@@ -192,49 +194,3 @@ def plot_bars_rel(
 
     plt.tight_layout()
     plt.show()
-
-
-
-def evaluate_and_report(random_search, X_test, y_test):
-    """
-    Prints the best parameters and cross-validated score from RandomizedSearchCV,
-    evaluates the best estimator on the test set, and prints performance metrics.
-    """
-    # =========================
-    # BEST RESULTS
-    # =========================
-    print("Best CV ROC AUC:", random_search.best_score_)
-    print("\nBest Parameters:")
-    for k, v in random_search.best_params_.items():
-        print(f"{k}: {v}")
-
-    # =========================
-    # TEST EVALUATION
-    # =========================
-    best_model = random_search.best_estimator_
-
-    # probabilities
-    y_pred_proba = best_model.predict_proba(X_test)[:, 1]
-
-    # threshold (can tune later)
-    threshold = 0.5
-    y_pred = (y_pred_proba >= threshold).astype(int)
-
-    # metrics
-    roc_auc = roc_auc_score(y_test, y_pred_proba)
-    pr_auc = average_precision_score(y_test, y_pred_proba)
-    precision = precision_score(y_test, y_pred)
-    recall = recall_score(y_test, y_pred)
-    cm = confusion_matrix(y_test, y_pred)
-
-    print("\nTest ROC AUC:", roc_auc)
-    print("Test PR AUC:", pr_auc)
-    print("Precision:", precision)
-    print("Recall:", recall)
-
-    print("\nConfusion Matrix:")
-    print(pd.DataFrame(
-        cm,
-        index=["Actual 0", "Actual 1"],
-        columns=["Pred 0", "Pred 1"]
-    ))
