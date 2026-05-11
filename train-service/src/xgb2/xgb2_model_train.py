@@ -185,7 +185,7 @@ def train_and_log_model(
         n_iter=n_iter,
         scoring="average_precision",
         cv=cv,
-        verbose=1,
+        verbose=2,
         random_state=random_state,
         n_jobs=-1,
         error_score="raise",
@@ -277,7 +277,7 @@ def train_and_log_model(
 def main():
 
     # MLFLOW CONFIG
-    mlflow.set_tracking_uri("http://mlflow:5000")
+    mlflow.set_tracking_uri("http://mlflow:5000/mlflow")
     mlflow.set_experiment("credit-risk-models")
 
     engine = get_engine()

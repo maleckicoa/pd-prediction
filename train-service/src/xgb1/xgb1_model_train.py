@@ -198,7 +198,7 @@ def train_and_log_model(
 # =========================
 def main():
     # MLFLOW CONFIG (same as LR)
-    mlflow.set_tracking_uri("http://mlflow:5000")
+    mlflow.set_tracking_uri("http://mlflow:5000/mlflow")
     mlflow.set_experiment("credit-risk-models")
 
     engine = get_engine()

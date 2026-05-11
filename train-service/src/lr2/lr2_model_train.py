@@ -174,7 +174,7 @@ def train_and_log_model(
 
 
 def main():
-    mlflow.set_tracking_uri("http://mlflow:5000")
+    mlflow.set_tracking_uri("http://mlflow:5000/mlflow")
     mlflow.set_experiment("credit-risk-models")
     engine = get_engine()
     X_train, X_val, y_train, y_val, num_indicator_columns = prepare_datasets(engine)

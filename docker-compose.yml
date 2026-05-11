@@ -38,9 +38,12 @@ services:
       - --backend-store-uri=sqlite:///mlflow/mlflow.db
       - --artifacts-destination=/artifacts
       - --allowed-hosts=*
+      - --static-prefix
+      - /mlflow
     restart: unless-stopped
 
-  trainer:
+  train:
+    image: pd-prediction-train:latest
     build:
       context: .
       dockerfile: train-service/Dockerfile.train
@@ -62,7 +65,34 @@ services:
         condition: service_started
     profiles: ["train"]
 
-  fetcher:
+  # Runs once before predict: trains LR1 if models/lr1_model.pkl is missing (empty or new models/ folder).
+  train-init:
+    image: pd-prediction-train:latest
+    build:
+      context: .
+      dockerfile: train-service/Dockerfile.train
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      GIT_PYTHON_REFRESH: quiet
+    volumes:
+      - ./models:/app/models
+      - ./train-service/src:/app/train-service/src
+      - ./shared:/app/shared
+      - ./.env:/app/.env:ro
+      - ./train-init/ensure_lr1_model.sh:/app/train-init/ensure_lr1_model.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+    entrypoint: ["/bin/sh"]
+    command: ["/app/train-init/ensure_lr1_model.sh"]
+    restart: "no"
+
+  fetch:
     build:
       context: .
       dockerfile: fetch-service/Dockerfile.fetch
@@ -94,9 +124,8 @@ services:
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      MODEL_NAME: ${MODEL_NAME:-xgb2}
-      MODEL_PATH: ${MODEL_PATH:-/app/models/xgb2_model.pkl}
-      MODEL_SCHEMA_PATH: ${MODEL_SCHEMA_PATH:-/app/predict-service/src/xgb2/xgb2_schema.json}
+      # Default lr1 matches cold-start train-init.
+      MODEL_NAMES: ${MODEL_NAMES:-lr1}
     ports:
       - "8800:8800"
     volumes:
@@ -108,6 +137,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      train-init:
+        condition: service_completed_successfully
     profiles: ["fetch", "predict"]
 
 volumes:
