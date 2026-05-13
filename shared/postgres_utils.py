@@ -81,6 +81,22 @@ def fetch_random_loan(engine) -> pd.DataFrame:
     return df
 
 
+def fetch_last_completed_loan_uuid(engine) -> str | None:
+    """Most recent loan_uuid fully written to test_feat_hit (used to resume the fetch loop)."""
+    stmt = text(
+        """
+        SELECT loan_uuid::text AS loan_uuid
+        FROM test_feat_hit
+        ORDER BY loan_event_idx DESC
+        LIMIT 1
+        """
+    )
+    df = pd.read_sql(stmt, engine)
+    if df.empty or df.iloc[0]["loan_uuid"] is None:
+        return None
+    return str(df.iloc[0]["loan_uuid"])
+
+
 def fetch_next_loan(engine, last_uuid: str | None = None) -> pd.DataFrame:
     if last_uuid:
         stmt = text(

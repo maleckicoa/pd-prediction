@@ -6,6 +6,8 @@ from pathlib import Path
 
 import mlflow
 import mlflow.sklearn
+from mlflow.tracking import MlflowClient
+
 import category_encoders as ce
 
 from sklearn.compose import ColumnTransformer
@@ -251,7 +253,7 @@ def train_and_log_model(
         # MODEL LOG
         mlflow.sklearn.log_model(
             random_search.best_estimator_,
-            artifact_path="model",
+            artifact_path="xgb_v2",
             input_example=X_val.head(5),
         )
 
@@ -278,7 +280,14 @@ def main():
 
     # MLFLOW CONFIG
     mlflow.set_tracking_uri("http://mlflow:5000/mlflow")
-    mlflow.set_experiment("credit-risk-models")
+    experiment_name = "credit-risk-models"
+    client = MlflowClient()
+    exp = client.get_experiment_by_name(experiment_name)
+    if exp is not None:
+        for run in client.search_runs(experiment_ids=[exp.experiment_id], max_results=500):
+            if run.info.run_name == "xgb_v2":
+                client.delete_run(run.info.run_id)
+    mlflow.set_experiment(experiment_name)
 
     engine = get_engine()
 

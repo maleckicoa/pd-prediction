@@ -7,6 +7,7 @@ from pathlib import Path
 import joblib
 import mlflow
 import mlflow.pytorch
+from mlflow.tracking import MlflowClient
 import numpy as np
 import pandas as pd
 import torch
@@ -349,7 +350,7 @@ def train_and_log_model(
 
         fig = plot_confusion_matrix(results["confusion_matrix"])
         mlflow.log_figure(fig, "confusion_matrix_normalized.png")
-        mlflow.pytorch.log_model(model, artifact_path="model")
+        mlflow.pytorch.log_model(model, artifact_path="dnn_v1")
 
     joblib.dump(
         {
@@ -373,7 +374,14 @@ def main():
     set_seed(SEED)
 
     mlflow.set_tracking_uri("http://mlflow:5000/mlflow")
-    mlflow.set_experiment("credit-risk-models")
+    experiment_name = "credit-risk-models"
+    client = MlflowClient()
+    exp = client.get_experiment_by_name(experiment_name)
+    if exp is not None:
+        for run in client.search_runs(experiment_ids=[exp.experiment_id], max_results=500):
+            if run.info.run_name == "dnn_v1":
+                client.delete_run(run.info.run_id)
+    mlflow.set_experiment(experiment_name)
 
     engine = get_engine()
     X_train, X_val, y_train, y_val = prepare_datasets(engine)

@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 import mlflow
 import mlflow.sklearn
+from mlflow.tracking import MlflowClient
 
 from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold, train_test_split
@@ -156,7 +157,7 @@ def train_and_log_model(
 
         mlflow.sklearn.log_model(
             random_search.best_estimator_,
-            artifact_path="model",
+            artifact_path="lr_v1",
             input_example=X_val.head(5),
         )
 
@@ -171,7 +172,14 @@ def train_and_log_model(
 def main():
     # MLFLOW CONFIG
     mlflow.set_tracking_uri("http://mlflow:5000/mlflow")
-    mlflow.set_experiment("credit-risk-models")
+    experiment_name = "credit-risk-models"
+    client = MlflowClient()
+    exp = client.get_experiment_by_name(experiment_name)
+    if exp is not None:
+        for run in client.search_runs(experiment_ids=[exp.experiment_id], max_results=500):
+            if run.info.run_name == "lr_v1":
+                client.delete_run(run.info.run_id)
+    mlflow.set_experiment(experiment_name)
     engine = get_engine()
     X_train, X_val, y_train, y_val, num_indicator_columns = prepare_datasets(engine)
     preprocessor = build_preprocessor(num_indicator_columns)

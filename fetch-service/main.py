@@ -19,7 +19,12 @@ for candidate in candidates:
         sys.path.insert(0, str(candidate))
         break
 
-from shared.postgres_utils import fetch_next_loan, get_engine, reset_test_cycle_tables  # noqa: E402
+from shared.postgres_utils import (  # noqa: E402
+    fetch_last_completed_loan_uuid,
+    fetch_next_loan,
+    get_engine,
+    reset_test_cycle_tables,
+)
 from shared.models import LoanData  # noqa: E402
 from src.feature_bin_events import load_feature_profile, write_feature_bin_events  # noqa: E402
 
@@ -47,7 +52,12 @@ def main() -> None:
     profile_by_feature = load_feature_profile(engine)
     if not profile_by_feature:
         raise RuntimeError("train_feat_dist is empty; cannot write PSI events")
-    last_uuid: str | None = None
+    last_uuid: str | None = fetch_last_completed_loan_uuid(engine)
+    if last_uuid:
+        print(
+            json.dumps({"resume_from_loan_uuid": last_uuid}),
+            flush=True,
+        )
 
     interval_seconds = float(os.getenv("FETCH_INTERVAL_SECONDS", "5"))
     run_service_url = os.getenv("RUN_SERVICE_URL", "http://predict:8800/predict")

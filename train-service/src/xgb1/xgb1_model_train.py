@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 import mlflow
 import mlflow.sklearn
+from mlflow.tracking import MlflowClient
 
 from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold, train_test_split
 from xgboost import XGBClassifier
@@ -117,7 +118,7 @@ def train_and_log_model(
         n_iter=n_iter,
         scoring="average_precision",
         cv=cv,
-        verbose=1,
+        verbose=2,
         random_state=random_state,
         n_jobs=-1,
         error_score="raise",
@@ -167,7 +168,7 @@ def train_and_log_model(
         # MODEL LOG (same as LR)
         mlflow.sklearn.log_model(
             random_search.best_estimator_,
-            artifact_path="model",
+            artifact_path="xgb_v1",
             input_example=X_val.head(5),
         )
 
@@ -199,7 +200,14 @@ def train_and_log_model(
 def main():
     # MLFLOW CONFIG (same as LR)
     mlflow.set_tracking_uri("http://mlflow:5000/mlflow")
-    mlflow.set_experiment("credit-risk-models")
+    experiment_name = "credit-risk-models"
+    client = MlflowClient()
+    exp = client.get_experiment_by_name(experiment_name)
+    if exp is not None:
+        for run in client.search_runs(experiment_ids=[exp.experiment_id], max_results=500):
+            if run.info.run_name == "xgb_v1":
+                client.delete_run(run.info.run_id)
+    mlflow.set_experiment(experiment_name)
 
     engine = get_engine()
 

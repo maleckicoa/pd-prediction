@@ -1,3 +1,4 @@
+import logging
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -21,15 +22,18 @@ from shared.postgres_utils import (  # noqa: E402
     get_engine,
     write_default_prob,
 )
-from src.lr1.lr1_predict import Lr1Predictor  # noqa: E402
 from src.utils import (  # noqa: E402
     parse_model_names,
     resolve_model_path,
     resolve_schema_path,
     resolve_threshold,
 )
+from src.lr1.lr1_predict import Lr1Predictor  # noqa: E402
+#from src.lr2.lr2_predict import Lr2Predictor  # noqa: E402
 from src.xgb1.xgb1_predict import Xgb1Predictor  # noqa: E402
 from src.xgb2.xgb2_predict import Xgb2Predictor  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 class UnsupportedModelError(ValueError):
@@ -39,6 +43,7 @@ class UnsupportedModelError(ValueError):
 def build_predictor(model_name: str, model_path: str, schema_path: str | None) -> Any:
     predictors = {
         "lr1": Lr1Predictor,
+        #"lr2": Lr2Predictor,
         "xgb1": Xgb1Predictor,
         "xgb2": Xgb2Predictor,
     }
@@ -58,12 +63,20 @@ predictors: Dict[str, Any] = {}
 threshold_by_model: Dict[str, float] = {}
 
 for name in model_names:
-    predictors[name] = build_predictor(
-        model_name=name,
-        model_path=resolve_model_path(name),
-        schema_path=resolve_schema_path(name),
-    )
-    threshold_by_model[name] = resolve_threshold(name)
+    try:
+        predictors[name] = build_predictor(
+            model_name=name,
+            model_path=resolve_model_path(name),
+            schema_path=resolve_schema_path(name),
+        )
+        threshold_by_model[name] = resolve_threshold(name)
+    except Exception as exc:
+        logger.warning("Skipping model %r: %s", name, exc)
+
+if not predictors:
+    sys.exit("No models loaded — check logs.")
+if "lr1" in model_names and "lr1" not in predictors:
+    sys.exit("lr1 model failed to load.")
 
 
 @app.get("/health")
