@@ -1,32 +1,13 @@
+WIPE OUT EVERYTHING (Including MLflow and Postgres VOlumes)
 
-DELETE ALL CONTAINERS and IMAGE
-docker image list
-docker rm $(docker ps -a --filter "ancestor=<image ID>" -q)
-docker rmi <image ID>
-docker rm <container ID>
-
-BUILD THE IMAGE
-docker build -t pd_pred:latest .
-
-RUN THE IMAGE
-docker run -ti pd_pred
-
-COPY FILES FROM RUNNING CONTAINER INTO LOCAL FOLDER
-docker cp <container ID>:/usr/src/app/. /my_local_repository
-
-MAKE VOLUME
-docker run -v /my_local_repository:/usr/src/app pd_pred
-
-OPEN A RUNNING CONTAINER
-docker exec -it <container ID> sh
+cd demo-service/pd-prediction
+docker compose --profile fetch down -v --remove-orphans
+docker compose --profile fetch up -d --build
 
 
-PUSH IMAGE TO DOCKER HUB
-docker login
-docker tag pd_pred:latest maleckicoa/pd_pred:latest
-docker push maleckicoa/pd_pred:latest
+WIPE OUT EVERYTHING EXCEPT MLFlow volumes 
 
-OTHER
-docker build -t pd-pred:latest .                   # build image
-docker run --rm -p 8000:8000 pd-prediction:latest  # run container (-rm deletes the container once it stops)
-docker pull maleckicoa/pd-pred                     # pull image
+cd demo-service/pd-prediction
+docker compose --profile fetch down --remove-orphans
+docker volume rm pd-prediction_pgdata
+docker compose --profile fetch up -d --build
