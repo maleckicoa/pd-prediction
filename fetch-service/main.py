@@ -21,12 +21,35 @@ for candidate in candidates:
 
 from shared.postgres_utils import (  # noqa: E402
     fetch_last_completed_loan_uuid,
+    fetch_loan_id_for_uuid,
     fetch_next_loan,
     get_engine,
     reset_test_cycle_tables,
 )
 from shared.models import LoanData  # noqa: E402
 from src.feature_bin_events import load_feature_profile, write_feature_bin_events  # noqa: E402
+
+PSI_HIT_FEATURE_NAMES = frozenset(
+    {"age",
+    "account_status",
+    "merchant_category",
+    "merchant_group",
+    "has_paid",
+    "num_active_inv",
+    "num_unpaid_bills",
+    "recovery_debt",
+    "time_hours",
+    "name_in_email",
+    "worst_status_active_inv",
+    "status_last_archived_0_24m",
+    "status_max_archived_0_24_months",
+    "sum_paid_inv_0_12m",
+    "avg_payment_span_0_12m",
+    "max_paid_inv_0_24m",
+    "account_incoming_debt_vs_paid_0_24m",
+    "num_active_div_by_paid_inv_0_12m"
+   }
+)
 
 
 def normalize_loan_row(raw_loan: dict) -> dict:
@@ -52,6 +75,14 @@ def main() -> None:
     profile_by_feature = load_feature_profile(engine)
     if not profile_by_feature:
         raise RuntimeError("train_feat_dist is empty; cannot write PSI events")
+    profile_by_feature = {
+        k: v for k, v in profile_by_feature.items() if k in PSI_HIT_FEATURE_NAMES
+    }
+    if not profile_by_feature:
+        raise RuntimeError(
+            "train_feat_dist has no rows for PSI_HIT_FEATURE_NAMES "
+            f"{sorted(PSI_HIT_FEATURE_NAMES)!r}"
+        )
     last_uuid: str | None = fetch_last_completed_loan_uuid(engine)
     if last_uuid:
         print(
@@ -62,6 +93,8 @@ def main() -> None:
     interval_seconds = float(os.getenv("FETCH_INTERVAL_SECONDS", "5"))
     run_service_url = os.getenv("RUN_SERVICE_URL", "http://predict:8800/predict")
     request_timeout = float(os.getenv("RUN_SERVICE_TIMEOUT_SECONDS", "10"))
+    # Write test_feat_hit only when loan_ids.id is a multiple of this stride (default 30 → 30, 60, …).
+    psi_hit_loan_id_stride = max(1, int(os.getenv("FETCH_PSI_HIT_LOAN_ID_STRIDE", "30")))
 
     while True:
         loan_df = fetch_next_loan(engine, last_uuid=last_uuid)
@@ -105,7 +138,36 @@ def main() -> None:
                 ),
                 flush=True,
             )
-            write_feature_bin_events(engine, profile_by_feature, raw_loan)
+            loan_db_id = (
+                fetch_loan_id_for_uuid(engine, str(current_uuid))
+                if current_uuid is not None
+                else None
+            )
+            if loan_db_id is None:
+                print(
+                    json.dumps(
+                        {
+                            "psi_hit_skipped": True,
+                            "reason": "loan_ids_row_missing_after_predict",
+                            "uuid": str(current_uuid) if current_uuid is not None else None,
+                        }
+                    ),
+                    flush=True,
+                )
+            elif loan_db_id % psi_hit_loan_id_stride == 0:
+                write_feature_bin_events(engine, profile_by_feature, raw_loan)
+            else:
+                print(
+                    json.dumps(
+                        {
+                            "psi_hit_skipped": True,
+                            "reason": "loan_id_not_on_stride",
+                            "loan_ids_id": loan_db_id,
+                            "stride": psi_hit_loan_id_stride,
+                        }
+                    ),
+                    flush=True,
+                )
             if current_uuid is not None:
                 last_uuid = str(current_uuid)
         except ValidationError as exc:

@@ -102,6 +102,7 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       FETCH_INTERVAL_SECONDS: 5
+      FETCH_PSI_HIT_LOAN_ID_STRIDE: ${FETCH_PSI_HIT_LOAN_ID_STRIDE:-30}
       RUN_SERVICE_URL: http://predict:8800/predict
     volumes:
       - ./fetch-service:/app/fetch-service

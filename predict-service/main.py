@@ -56,7 +56,7 @@ def build_predictor(model_name: str, model_path: str, schema_path: str | None) -
     return predictor_class(model_path=model_path, schema_path=schema_path)
 
 
-app = FastAPI()
+app = FastAPI(title="PD Predict - Predict Service")
 engine = get_engine()
 model_names = parse_model_names()
 predictors: Dict[str, Any] = {}

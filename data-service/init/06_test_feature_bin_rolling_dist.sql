@@ -14,12 +14,12 @@ WITH rolling AS (
         (SUM(e.hit) OVER (
             PARTITION BY e.feature_name, e.feature_type, e.bin_index, e.category_value
             ORDER BY e.loan_event_idx ASC, e.id ASC
-            ROWS BETWEEN 4999 PRECEDING AND CURRENT ROW
+            ROWS BETWEEN 499 PRECEDING AND CURRENT ROW
         ))::DOUBLE PRECISION AS rolling_hit_count,
         COUNT(*) OVER (
             PARTITION BY e.feature_name, e.feature_type, e.bin_index, e.category_value
             ORDER BY e.loan_event_idx ASC, e.id ASC
-            ROWS BETWEEN 4999 PRECEDING AND CURRENT ROW
+            ROWS BETWEEN 499 PRECEDING AND CURRENT ROW
         ) AS rolling_window_size
     FROM test_feat_hit e
 )

@@ -179,6 +179,8 @@ There is currently no single “champion” model. Model runs are logged individ
 
 In the data-service, see the Postgres view: **`test_defaults_roll_metrics`**.
 
+The demo UI plots rolling KPIs from **`test_defaults_roll_metrics_sparse`**: the same windowed precision/recall as the dense view, restricted to rows with **`MOD(id, 30) = 0`** (fewer points for the charts).
+
 Rolling precision and recall are computed on a rolling window of **5,000** loans.
 
 Model thresholds are calibrated on the training dataset to maximize recall while maintaining precision **≥ 0.15**.

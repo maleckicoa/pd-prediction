@@ -81,6 +81,15 @@ def fetch_random_loan(engine) -> pd.DataFrame:
     return df
 
 
+def fetch_loan_id_for_uuid(engine, loan_uuid: str) -> int | None:
+    """Return ``loan_ids.id`` for a scored loan (row exists after predict writes ``test_defaults``)."""
+    stmt = text("SELECT id FROM loan_ids WHERE uuid = CAST(:uid AS uuid)")
+    df = pd.read_sql(stmt, engine, params={"uid": loan_uuid})
+    if df.empty or df.iloc[0]["id"] is None:
+        return None
+    return int(df.iloc[0]["id"])
+
+
 def fetch_last_completed_loan_uuid(engine) -> str | None:
     """Most recent loan_uuid fully written to test_feat_hit (used to resume the fetch loop)."""
     stmt = text(
